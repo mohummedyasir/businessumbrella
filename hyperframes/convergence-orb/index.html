@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Convergence — Liquid Glass Orb</title>
+    <script src="assets/vendor/three.min.js"></script>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <script src="assets/vendor/shaders/CopyShader.js"></script>
+    <script src="assets/vendor/shaders/LuminosityHighPassShader.js"></script>
+    <script src="assets/vendor/postprocessing/EffectComposer.js"></script>
+    <script src="assets/vendor/postprocessing/RenderPass.js"></script>
+    <script src="assets/vendor/postprocessing/ShaderPass.js"></script>
+    <script src="assets/vendor/postprocessing/UnrealBloomPass.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #000;
+      }
+      #stage {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1920px;
+        height: 1080px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-root="true"
+      data-start="0"
+      data-duration="12"
+      data-width="1920"
+      data-height="1080"
+    >
+      <canvas id="stage" width="1920" height="1080"></canvas>
+
+      <!-- Timeline driver clip (required); invisible, drives the GSAP timeline -->
+      <div
+        id="driver"
+        class="clip"
+        data-start="0"
+        data-duration="12"
+        data-track-index="0"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
+      ></div>
+    </div>
+
+    <script>
+      "use strict";
+      var W = 1920,
+        H = 1080,
+        DURATION = 12,
+        ASPECT = W / H;
+
+      // ── Seeded PRNG (deterministic — no unseeded Math.random) ────────────
+      function seeded(seed) {
+        var v = seed >>> 0;
+        return function () {
+          v += 0x6d2b79f5;
+          var m = v;
+          m = Math.imul(m ^ (m >>> 15), m | 1);
+          m ^= m + Math.imul(m ^ (m >>> 7), m | 61);
+          return ((m ^ (m >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+      function smooth(a, b, x) {
+        var t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+        return t * t * (3 - 2 * t);
+      }
+
+      // ── Renderer ─────────────────────────────────────────────────────────
+      var canvas = document.getElementById("stage");
+      var renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: "high-performance",
+        preserveDrawingBuffer: true,
+      });
+      renderer.setSize(W, H, false);
+      renderer.setPixelRatio(1);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.95;
+      renderer.setClearColor(0x000000, 1);
+
+      var scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000000);
+      scene.fog = new THREE.FogExp2(0x000000, 0.045);
+
+      // ── Environment map: pitch-black studio + crisp softbox stripes ──────
+      var envCanvas = document.createElement("canvas");
+      envCanvas.width = 1024;
+      envCanvas.height = 512;
+      var ex = envCanvas.getContext("2d");
+      ex.fillStyle = "#000000";
+      ex.fillRect(0, 0, 1024, 512);
+      function softbox(cx, cy, w, h, inner, outer) {
+        var g = ex.createLinearGradient(cx - w / 2, cy, cx + w / 2, cy);
+        g.addColorStop(0, outer);
+        g.addColorStop(0.5, inner);
+        g.addColorStop(1, outer);
+        ex.fillStyle = g;
+        ex.fillRect(cx - w / 2, cy - h / 2, w, h);
+      }
+      ex.globalCompositeOperation = "screen";
+      softbox(220, 180, 260, 360, "rgba(235,244,255,1.0)", "rgba(20,40,70,0)");
+      softbox(560, 150, 150, 300, "rgba(255,255,255,1.0)", "rgba(40,40,60,0)");
+      softbox(820, 300, 220, 300, "rgba(255,228,205,0.95)", "rgba(60,30,10,0)");
+      // crisp thin bars → razor-sharp streak reflections
+      for (var i = 0; i < 9; i++) {
+        var by = 40 + i * 52;
+        ex.fillStyle = i % 2 === 0 ? "rgba(215,235,255,0.85)" : "rgba(255,220,195,0.7)";
+        ex.fillRect(30 + (i % 3) * 70, by, 960, 2);
+      }
+      var envTex = new THREE.CanvasTexture(envCanvas);
+      envTex.mapping = THREE.EquirectangularReflectionMapping;
+      var pmrem = new THREE.PMREMGenerator(renderer);
+      var envMap = pmrem.fromEquirectangular(envTex);
+      scene.environment = envMap.texture;
+      envTex.dispose();
+      pmrem.dispose();
+
+      // ── Camera ───────────────────────────────────────────────────────────
+      var camera = new THREE.PerspectiveCamera(38, ASPECT, 0.1, 100);
+      camera.position.set(0, 0, 12.5);
+      camera.lookAt(0, 0, 0);
+
+      // ── Moody side lighting ──────────────────────────────────────────────
+      scene.add(new THREE.AmbientLight(0x05070c, 0.35));
+      var keyCool = new THREE.PointLight(0x4f8dff, 60, 40, 2);
+      keyCool.position.set(6.5, 3.5, 5);
+      scene.add(keyCool);
+      var keyWarm = new THREE.PointLight(0xff7b34, 55, 40, 2);
+      keyWarm.position.set(-6.8, -2.2, 4.5);
+      scene.add(keyWarm);
+      var rim = new THREE.DirectionalLight(0xbfe0ff, 1.4);
+      rim.position.set(-3, 6, -6);
+      scene.add(rim);
+
+      var SAPPHIRE = new THREE.Color(0x1f5bff);
+      var COPPER = new THREE.Color(0xff6a1f);
+
+      // ── Ribbon builder: thick coiling metallic tube ──────────────────────
+      function makeRibbon(sign, tint, seed) {
+        var r = seeded(seed);
+        var pts = [];
+        var N = 9;
+        for (var k = 0; k < N; k++) {
+          var t = k / (N - 1);
+          var ang = t * Math.PI * 3.2 * sign + sign * 0.4;
+          var rad = 1.15 + Math.sin(t * Math.PI) * 0.55;
+          pts.push(
+            new THREE.Vector3(
+              Math.cos(ang) * rad + (r() - 0.5) * 0.3,
+              (t - 0.5) * 4.4 + (r() - 0.5) * 0.3,
+              Math.sin(ang) * rad + (r() - 0.5) * 0.3,
+            ),
+          );
+        }
+        var curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.5);
+        var geo = new THREE.TubeGeometry(curve, 220, 0.34, 24, false);
+        var mat = new THREE.MeshPhysicalMaterial({
+          color: 0x0a0a0d,
+          metalness: 1.0,
+          roughness: 0.16,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.08,
+          emissive: tint.clone(),
+          emissiveIntensity: 0.6,
+          envMapIntensity: 1.6,
+          transparent: true,
+          opacity: 1.0,
+        });
+        var mesh = new THREE.Mesh(geo, mat);
+        var group = new THREE.Group();
+        group.add(mesh);
+        scene.add(group);
+        return { group: group, mesh: mesh, mat: mat };
+      }
+      var ribbonBlue = makeRibbon(1, SAPPHIRE, 101);
+      var ribbonCopper = makeRibbon(-1, COPPER, 202);
+
+      // ── Glass orb: reflective shell + swirling energy core ───────────────
+      var orb = new THREE.Group();
+      scene.add(orb);
+      var shellGeo = new THREE.SphereGeometry(1.55, 96, 96);
+      var shellMat = new THREE.MeshPhysicalMaterial({
+        color: 0x04060c,
+        metalness: 0.1,
+        roughness: 0.015,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.015,
+        transparent: true,
+        opacity: 0.55,
+        reflectivity: 1.0,
+        envMapIntensity: 3.2,
+        ior: 1.5,
+        depthWrite: false,
+        side: THREE.FrontSide,
+      });
+      var shell = new THREE.Mesh(shellGeo, shellMat);
+      shell.renderOrder = 1; // reflective glass drawn first
+      orb.add(shell);
+
+      var coreUniforms = {
+        uTime: { value: 0 },
+        uEnergy: { value: 0 },
+        uFlash: { value: 0 },
+        uBlue: { value: new THREE.Color(0x2a6bff) },
+        uCopper: { value: new THREE.Color(0xff7a2a) },
+      };
+      var coreMat = new THREE.ShaderMaterial({
+        uniforms: coreUniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: [
+          "varying vec3 vLocal;",
+          "varying vec3 vNormal;",
+          "varying vec3 vView;",
+          "void main(){",
+          "  vLocal = position;",
+          "  vNormal = normalize(normalMatrix * normal);",
+          "  vec4 mv = modelViewMatrix * vec4(position,1.0);",
+          "  vView = normalize(-mv.xyz);",
+          "  gl_Position = projectionMatrix * mv;",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "precision highp float;",
+          "varying vec3 vLocal;",
+          "varying vec3 vNormal;",
+          "varying vec3 vView;",
+          "uniform float uTime; uniform float uEnergy; uniform float uFlash;",
+          "uniform vec3 uBlue; uniform vec3 uCopper;",
+          "float hash(vec3 p){ p=fract(p*0.3183099+0.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }",
+          "float vnoise(vec3 x){ vec3 i=floor(x); vec3 f=fract(x); f=f*f*(3.0-2.0*f);",
+          "  return mix(mix(mix(hash(i+vec3(0.,0.,0.)),hash(i+vec3(1.,0.,0.)),f.x),",
+          "                 mix(hash(i+vec3(0.,1.,0.)),hash(i+vec3(1.,1.,0.)),f.x),f.y),",
+          "             mix(mix(hash(i+vec3(0.,0.,1.)),hash(i+vec3(1.,0.,1.)),f.x),",
+          "                 mix(hash(i+vec3(0.,1.,1.)),hash(i+vec3(1.,1.,1.)),f.x),f.y),f.z); }",
+          "float fbm(vec3 p){ float a=0.5,s=0.0; for(int i=0;i<5;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5;} return s; }",
+          "void main(){",
+          "  vec3 p = normalize(vLocal);",
+          "  float t = uTime;",
+          "  vec3 warp = vec3(fbm(p*2.1 + t*0.25), fbm(p*2.1 + 11.0 - t*0.2), fbm(p*2.1 + 23.0 + t*0.18));",
+          "  float n = fbm(p*2.6 + warp*1.8 + vec3(0.0, t*0.35, 0.0));",
+          "  float n2 = fbm(p*4.0 - warp*1.2 - vec3(t*0.3, 0.0, 0.0));",
+          "  float mixv = smoothstep(0.25, 0.85, n*0.7 + n2*0.5);",
+          "  vec3 col = mix(uBlue, uCopper, mixv);",
+          "  float veins = pow(abs(sin(n*9.0 + n2*6.0 + t*1.2)), 6.0);",
+          "  col += veins * mix(uBlue, uCopper, 0.5) * 0.9;",
+          "  float fres = pow(1.0 - max(dot(normalize(vNormal), normalize(vView)), 0.0), 2.2);",
+          "  float body = pow(clamp(n, 0.0, 1.0), 1.7);",
+          "  float intensity = uEnergy * (body*0.72 + veins*0.5 + fres*0.32) + uFlash*1.1;",
+          "  col *= 0.85;",
+          "  gl_FragColor = vec4(col * intensity, 1.0);",
+          "}",
+        ].join("\n"),
+      });
+      var core = new THREE.Mesh(new THREE.SphereGeometry(1.0, 96, 96), coreMat);
+      core.renderOrder = 2; // energy glows inside the glass
+      orb.add(core);
+
+      // Additive Fresnel rim — energy hugging the glass edge (blue↔copper)
+      var rimUniforms = {
+        uTime: { value: 0 },
+        uEnergy: { value: 0 },
+        uBlue: { value: new THREE.Color(0x2f7bff) },
+        uCopper: { value: new THREE.Color(0xff7326) },
+      };
+      var rimMat = new THREE.ShaderMaterial({
+        uniforms: rimUniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.FrontSide,
+        vertexShader: [
+          "varying vec3 vN; varying vec3 vV; varying vec3 vL;",
+          "void main(){",
+          "  vN = normalize(normalMatrix * normal);",
+          "  vL = position;",
+          "  vec4 mv = modelViewMatrix * vec4(position,1.0);",
+          "  vV = normalize(-mv.xyz);",
+          "  gl_Position = projectionMatrix * mv;",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "precision highp float;",
+          "varying vec3 vN; varying vec3 vV; varying vec3 vL;",
+          "uniform float uTime; uniform float uEnergy; uniform vec3 uBlue; uniform vec3 uCopper;",
+          "void main(){",
+          "  float fres = pow(1.0 - max(dot(normalize(vN), normalize(vV)), 0.0), 3.0);",
+          "  float ang = atan(vL.y, vL.x);",
+          "  float band = 0.5 + 0.5 * sin(ang*2.0 + vL.z*2.5 + uTime*1.1);",
+          "  vec3 col = mix(uBlue, uCopper, band);",
+          "  gl_FragColor = vec4(col * fres * uEnergy * 1.8, 1.0);",
+          "}",
+        ].join("\n"),
+      });
+      var rim = new THREE.Mesh(new THREE.SphereGeometry(1.58, 96, 96), rimMat);
+      rim.renderOrder = 3;
+      orb.add(rim);
+      orb.scale.setScalar(0.0001);
+
+      // ── Post-processing: bloom + cinematic grade / DoF / grain ───────────
+      var composer = new THREE.EffectComposer(renderer);
+      composer.setSize(W, H);
+      composer.setPixelRatio(1);
+      composer.addPass(new THREE.RenderPass(scene, camera));
+      var bloom = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.7, 0.6, 0.55);
+      composer.addPass(bloom);
+
+      var CinemaShader = {
+        uniforms: {
+          tDiffuse: { value: null },
+          uTime: { value: 0 },
+          uDof: { value: 0.9 },
+          uAberration: { value: 1.0 },
+          uVignette: { value: 1.0 },
+          uFlash: { value: 0 },
+          uRes: { value: new THREE.Vector2(W, H) },
+        },
+        vertexShader: [
+          "varying vec2 vUv;",
+          "void main(){ vUv=uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+        ].join("\n"),
+        fragmentShader: [
+          "precision highp float;",
+          "varying vec2 vUv;",
+          "uniform sampler2D tDiffuse;",
+          "uniform float uTime; uniform float uDof; uniform float uAberration; uniform float uVignette; uniform float uFlash;",
+          "float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }",
+          "void main(){",
+          "  vec2 uv = vUv;",
+          "  vec2 c = uv - 0.5;",
+          "  float dist = length(c);",
+          "  float blur = smoothstep(0.12, 0.72, dist) * uDof;",
+          "  vec3 col = vec3(0.0);",
+          "  float tot = 0.0;",
+          "  for(int i=0;i<8;i++){",
+          "    float f = float(i)/7.0;",
+          "    vec2 dir = c * blur * 0.06 * f;",
+          "    float w = 1.0 - f*0.6;",
+          "    vec2 ca = c * (0.0016 + 0.004*dist) * uAberration;",
+          "    vec3 s;",
+          "    s.r = texture2D(tDiffuse, uv - dir + ca).r;",
+          "    s.g = texture2D(tDiffuse, uv - dir).g;",
+          "    s.b = texture2D(tDiffuse, uv - dir - ca).b;",
+          "    col += s * w; tot += w;",
+          "  }",
+          "  col /= tot;",
+          "  col = pow(col, vec3(0.92));",
+          "  vec3 shadowTint = vec3(0.02,0.04,0.08);",
+          "  vec3 hiTint = vec3(1.05,0.98,0.92);",
+          "  float luma = dot(col, vec3(0.299,0.587,0.114));",
+          "  col = mix(col + shadowTint*(1.0-luma), col*hiTint, smoothstep(0.2,0.9,luma));",
+          "  col += uFlash * vec3(0.55,0.62,0.8);",
+          "  float vig = smoothstep(0.95, 0.35, dist);",
+          "  col *= mix(1.0, vig, uVignette);",
+          "  float g = hash21(uv*vec2(1920.0,1080.0) + fract(uTime));",
+          "  col += (g - 0.5) * 0.03;",
+          "  gl_FragColor = vec4(col, 1.0);",
+          "}",
+        ].join("\n"),
+      };
+      var cinema = new THREE.ShaderPass(CinemaShader);
+      composer.addPass(cinema);
+
+      // ── State + GSAP timeline (paused, seek-driven) ──────────────────────
+      var st = {
+        app: 0,
+        merge: 0,
+        reveal: 0,
+        camR: 12.5,
+        camTheta: -0.2,
+        bloom: 0.55,
+        dof: 0.95,
+        flash: 0,
+      };
+
+      // ── Deterministic render function ────────────────────────────────────
+      function renderScene(elapsed) {
+        var e = elapsed;
+        var app = st.app;
+        var merge = st.merge;
+        var reveal = st.reveal;
+
+        var theta = st.camTheta + Math.sin(e * 0.25) * 0.05 * reveal;
+        var R = st.camR;
+        var bob = Math.sin(e * 0.22) * 0.18 + Math.sin(e * 0.11) * 0.1;
+        camera.position.set(Math.sin(theta) * R, bob, Math.cos(theta) * R);
+        camera.lookAt(0, 0, 0);
+
+        var sep = (0.55 + 3.2 * (1 - app)) * (1 - merge);
+        var rscale = 1 - merge;
+        function driveRibbon(rb, dir, spin, phase) {
+          rb.group.position.x = dir * sep;
+          rb.group.position.y = Math.sin(e * 0.5 + phase) * 0.25 * (1 - merge);
+          rb.group.rotation.y = e * spin + dir * app * 1.6;
+          rb.group.rotation.x = Math.sin(e * 0.4 + phase) * 0.5 + app * 0.3;
+          rb.group.rotation.z = dir * (0.3 + app * 0.6) + Math.sin(e * 0.3) * 0.15;
+          rb.group.scale.setScalar(Math.max(0.0001, rscale));
+          rb.mat.opacity = Math.max(0, 1 - smooth(0.55, 1.0, merge));
+          rb.mat.emissiveIntensity = 0.55 + Math.sin(e * 1.3 + phase) * 0.12 + st.flash * 2.5;
+          rb.mesh.visible = merge < 0.999;
+        }
+        driveRibbon(ribbonBlue, 1, 0.55, 0.0);
+        driveRibbon(ribbonCopper, -1, -0.5, 2.1);
+
+        var pop = merge * (1 + 0.14 * Math.sin(Math.min(merge, 1) * Math.PI));
+        orb.scale.setScalar(Math.max(0.0001, pop));
+        orb.rotation.y = e * 0.14;
+        orb.rotation.x = Math.sin(e * 0.18) * 0.08;
+        shellMat.opacity = 0.45 + 0.15 * reveal;
+        var energy = Math.max(reveal, merge * 0.7) * 1.05;
+        coreUniforms.uTime.value = e;
+        coreUniforms.uEnergy.value = energy;
+        coreUniforms.uFlash.value = st.flash;
+        rimUniforms.uTime.value = e;
+        rimUniforms.uEnergy.value = Math.max(reveal, merge * 0.5);
+        core.visible = merge > 0.02;
+        shell.visible = merge > 0.02;
+        rim.visible = merge > 0.02;
+
+        keyCool.intensity = 55 + Math.sin(e * 0.6) * 8 + st.flash * 120;
+        keyWarm.intensity = 50 + Math.cos(e * 0.5) * 8 + st.flash * 100;
+
+        bloom.strength = st.bloom + st.flash * 1.2;
+        cinema.uniforms.uTime.value = e;
+        cinema.uniforms.uDof.value = st.dof;
+        cinema.uniforms.uFlash.value = st.flash;
+
+        composer.render();
+      }
+
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+      tl.to({ _: 0 }, { _: 1, duration: DURATION, ease: "none" }, 0);
+
+      // Phase A — approach (0–5s)
+      tl.to(st, { app: 1, camR: 8.4, camTheta: 0.5, duration: 5, ease: "power1.inOut" }, 0);
+      tl.to(st, { dof: 0.85, duration: 5, ease: "none" }, 0);
+
+      // Phase B — collision / merge (4.9–7.1s)
+      tl.to(st, { merge: 1, duration: 2.2, ease: "power3.in" }, 4.9);
+      tl.to(st, { camR: 6.6, duration: 2.2, ease: "power2.in", overwrite: "auto" }, 4.9);
+      tl.to(st, { flash: 0.7, duration: 0.16, ease: "power2.out" }, 6.75);
+      tl.to(st, { flash: 0, duration: 1.1, ease: "power2.in" }, 6.95);
+
+      // Phase C — orb hero (6.9–12s)
+      tl.to(st, { reveal: 1, duration: 2.6, ease: "power2.out" }, 6.9);
+      tl.to(st, { camR: 5.4, duration: 5.1, ease: "sine.inOut", overwrite: "auto" }, 6.9);
+      tl.to(st, { camTheta: 1.35, duration: 5.1, ease: "sine.inOut" }, 6.9);
+      tl.to(st, { dof: 0.32, duration: 3.0, ease: "sine.inOut" }, 7.0);
+      tl.to(st, { bloom: 0.62, duration: 2.2, ease: "sine.inOut" }, 6.7);
+
+      tl.eventCallback("onUpdate", function () {
+        renderScene(tl.time());
+      });
+
+      window.__timelines["main"] = tl;
+
+      // Prime frame 0
+      tl.seek(0);
+      renderScene(0);
+    </script>
+  </body>
+</html>
