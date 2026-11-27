@@ -1,25 +1,12 @@
-# Deal Follow-ups — 27 Nov 2026 (8 deals, AED 364k)
+# Deal Follow-ups — 27 Nov 2026 (5 live deals)
+
+Closed Lost in Zoho on 27 Nov: Superhumn (dead), TalentOne (bad meeting), Plexable (freelancer, not a buyer).
 
 Rules applied: drafts only. Reply inside the existing thread where one exists.
 CC on every email: jessica@, arsheela@, nitika@business-umbrella.com.
 Signature: your standard Sent-items block (CEO | Business Umbrella Group, .com).
 No fees, no figures, no other client names in the email body.
 Send window: Monday 30 Nov, 9–11 AM local time for each recipient.
-
----
-
-## 1. Superhumn — Jade Cheng — AED 300k (biggest)
-**To:** jade@superhumn.co
-**Reply in thread:** "Superhumn's Middle East launch" (sent 30 Oct, no reply)
-**Subject:** Re: Superhumn's Middle East launch
-
-Hi Jade,
-
-Quick one. Is the Global CEO search still open, or has the plan changed since July?
-
-If the timing is not right for the CEO role, we can start with one regional operations director first. You would see a shortlist before any wider commitment.
-
-A simple "yes, let's talk", "later" or "no" works for me.
 
 ---
 
@@ -68,34 +55,6 @@ If a 15-minute call next week is easier, I'm happy to work around your diary.
 
 ---
 
-## 5. TalentOne — Jacob Magwenzi — partnership / clinical staffing
-**To:** jacobmagwenzi@talentone.ae
-**Reply in thread:** "Clinical Staffing at Speed — Meeting with Business Umbrella - Recruitment Agreement"
-**Subject:** Re: Clinical Staffing at Speed — Recruitment Agreement
-
-Hi Jacob,
-
-You asked earlier about our rates per placement. My apologies for not closing that loop.
-
-Can we take 20 minutes next week to go through the placement terms and the clinical roles you are hiring for? I'll bring the agreement so we can finalise on the call.
-
-Does Tuesday or Wednesday morning suit you?
-
----
-
-## 6. Plexable — Hamza Jilani — mandate TBC
-**To:** hamzajilani@plexable.com
-**Reply in thread:** "Boardy Intro: Mohummed + Hamza"
-**Subject:** Re: Boardy Intro: Mohummed + Hamza
-
-Hi Hamza,
-
-It's been a few months since we spoke. I wanted to check in on Plexable's hiring plans for Q1.
-
-Are there any roles, technical or commercial, where a shortlist from us would help you move faster?
-
----
-
 ## 7. Business Cares — Abdallah — partnership TBC
 **To:** abdallah@business-cares.com
 **Reply in thread:** "Business Care | Exploring a recruitment partnership"
@@ -124,12 +83,10 @@ We are mapping senior cyber and AI talent across KSA and the UAE right now. Woul
 
 ---
 
-## Fix in Zoho CRM (wrong emails in deal notes)
+## Zoho CRM emails corrected on 27 Nov (done)
 | Deal | Zoho has | Real address (from Gmail) |
 |---|---|---|
 | National Bonds | padma.krishnan@ | padmakrishnan@nationalbonds.ae |
 | Pierre Marcolini | r.slaiby@ | rslaiby@marcolini.sa |
-| Plexable | hamza.jilani@ | hamzajilani@plexable.com |
-| TalentOne | jacob.magwenzi@ | jacobmagwenzi@talentone.ae |
 
-All 8 closing dates have passed. Reset each one after you get a reply.
+National Bonds and Pierre Marcolini: closing date moved to 31 Jan 2027, next step logged.
